@@ -1,21 +1,11 @@
-package subscription
+package entities
 
 import (
-	"errors"
+	"fmt"
 	"time"
-
-	utils "pay-service/internal/utils"
 )
 
-// Статус подписки
 type SubscriptionStatus string
-
-var (
-	ErrUserIdNotValid         = errors.New("userId: user id not valid")
-	ErrSubscriptionIdNotValid = errors.New("id: subscription id not valid")
-	ErrPayMethodMustBeActive  = errors.New("active: payment method must be active")
-	ErrRebillIDNotValid       = errors.New("rebillID: rebillID not valid")
-)
 
 const (
 	// Подписка активна и можно списывать - доступ есть
@@ -31,17 +21,11 @@ const (
 type Subscription struct {
 	ID                 string
 	SubscriptionStatus SubscriptionStatus
-	// Последняя дата оплаты
-	PayDate time.Time
-	// id пользователя из MongoDB
+	LastPayDate time.Time
 	UserID string
-	// информация об оплате
 	PaymentMethod PaymentMethodSnapshot
-	// Дата создания подписки
 	CreatedAt time.Time
-	// количество списаний по подписке (просто информационное поле)
-	Count int64
-	// Доступ до
+	PaymentsCount int64
 	AccessUntil time.Time
 }
 
@@ -52,67 +36,53 @@ type PaymentMethodSnapshot struct {
 	Last4    string // "1234" — последние 4 цифры карты
 }
 
-func CreateActiveSubscription(userID string, ID string, paymentMethod PaymentMethodSnapshot) (*Subscription, error) {
+func NewSubscription(userID string, ID string, paymentMethod PaymentMethodSnapshot, accessUntil time.Time) (*Subscription, error) {
 	if userID == "" {
-		return nil, ErrUserIdNotValid
+		return nil, fmt.Errorf("invalid param: %w", ErrInvalidUserId)
 	}
 
 	if ID == "" {
-		return nil, ErrSubscriptionIdNotValid
+		return nil, fmt.Errorf("invalid param: %w", ErrInvalidSubscriptionId)
 	}
 
 	if !paymentMethod.Active {
-		return nil, ErrPayMethodMustBeActive
+		return nil, fmt.Errorf("invalid param: %w", ErrInvalidPayMethod)
 	}
 
 	if paymentMethod.RebillID == "" {
-		return nil, ErrRebillIDNotValid
+		return nil, fmt.Errorf("invalid param: %w", ErrInvalidRebillId)
 	}
 
 	return &Subscription{
 		ID:                 ID,
 		SubscriptionStatus: SubscriptionStatusActive,
-		PayDate:            time.Now(),
+		LastPayDate:        time.Now(),
 		UserID:             userID,
 		PaymentMethod:      paymentMethod,
 		CreatedAt:          time.Now(),
-		Count:              1,
-		AccessUntil:				time.Now().AddDate(0, 1, 0),
+		PaymentsCount:              1,
+		AccessUntil:				accessUntil,
 	}, nil
 }
 
-func (subscription *Subscription) MarkPaid() {
-	subscription.Count += 1
-	subscription.PayDate = time.Now()
+func (subscription *Subscription) MarkPaid(accessUntil time.Time) {
+	subscription.PaymentsCount += 1
+	subscription.LastPayDate = time.Now()
 	subscription.SubscriptionStatus = SubscriptionStatusActive
-	subscription.AccessUntil = time.Now().AddDate(0, 1, 0)
+	subscription.AccessUntil = accessUntil
 }
 
-func (subscription *Subscription) CancelSubscription() {
-	today := time.Now()
-
-	if utils.AtLeastOneMonthPassed(subscription.PayDate, today) {
-		subscription.SubscriptionStatus = SubscriptionStatusDisable
-	}else {
-		subscription.SubscriptionStatus = SubscriptionStatusCancel
-	}
-}
-
-func (subscription *Subscription) ExpireIfPeriodEnded() {
-	subscription.SubscriptionStatus = SubscriptionStatusDisable
-}
-
-func (subscription *Subscription) FailedPaySubscription() {
-	subscription.SubscriptionStatus = SubscriptionStatusWaiting
+func (subscription *Subscription) SetStatus(status SubscriptionStatus) {
+	subscription.SubscriptionStatus = status
 }
 
 func (subscription *Subscription) SetPayInfoSubscription(RebillID string, Active bool, Brand string, Last4 string) error {
 	if !Active {
-		return ErrPayMethodMustBeActive
+		return fmt.Errorf("pay method not active: %w", ErrInvalidParam)
 	}
 
 	if RebillID == "" {
-		return ErrRebillIDNotValid
+		return fmt.Errorf("rebill id is empty: %w", ErrInvalidParam)
 	}
 
 	subscription.PaymentMethod.Active = Active
@@ -122,3 +92,24 @@ func (subscription *Subscription) SetPayInfoSubscription(RebillID string, Active
 
 	return nil
 }
+
+// func (subscription *Subscription) SubscriptionIsActive() bool { // На уровне сервиса - это бизнес логика?
+// 	if subscription.SubscriptionStatus == SubscriptionStatusWaiting ||
+// 		 subscription.SubscriptionStatus == SubscriptionStatusDisable {
+// 			return false
+// 	}
+
+// 	today := time.Now()
+
+// 	isExpired := subscription.AccessUntil.Before(today)
+
+// 	if isExpired {
+// 		return false
+// 	}
+
+// 	if subscription.SubscriptionStatus == SubscriptionStatusActive || subscription.SubscriptionStatus == SubscriptionStatusCancel  {
+// 		return true
+// 	}
+
+// 	return false
+// }

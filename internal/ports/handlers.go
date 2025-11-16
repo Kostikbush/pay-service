@@ -9,7 +9,7 @@ import (
 )
 
 type Service interface {
-	InitPay(userId string) string
+	InitPay(userId string) (string, error)
 }
 
 type Handler struct {
@@ -25,19 +25,20 @@ func (handler *Handler) InitPay(ginContext *gin.Context) {
 	userId = strings.TrimSpace(userId)
 
 	if !ok || userId == "" {
-		ginContext.JSON(http.StatusBadRequest, gin.H{"message": "Отсутствуют необходимые параметры", "type": "error"})
+		ginContext.JSON(http.StatusBadRequest, gin.H{"message": ErrInvalidParams.Error(), "type": "error"})
 		return
 	}
+
 	if utf8.RuneCountInString(userId) != 24 {
-		ginContext.JSON(http.StatusBadRequest, gin.H{"message": "Переданы невалидные данные", "type": "error"})
+		ginContext.JSON(http.StatusBadRequest, gin.H{"message": ErrInvalidParams.Error(), "type": "error"})
 		return
 	}
 
-	// Бизнес-логика уходит в сервис
-	msg := handler.service.InitPay(userId)
+	msg, err := handler.service.InitPay(userId)
 
-	ginContext.JSON(http.StatusOK, gin.H{
-		"greeting":  msg,
-		"userIdLen": utf8.RuneCountInString(userId),
-	})
+	if(err != nil) {
+		ginContext.JSON(http.StatusBadRequest, gin.H{"message": err.Error(), "type": "error"})
+	}
+
+	ginContext.JSON(http.StatusOK, gin.H{"message": msg, "type": "success"})
 }
